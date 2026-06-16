@@ -1,0 +1,37 @@
+# Dependency Engines
+node_modules/
+.pnpm-store/
+
+# Compiled Production Bundles / Distribution Nodes
+dist/
+build/
+.wxt/
+
+# IDE Workspace Cache
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Logs Profiles
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Application Secrets / Environments
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# Operating System Files
+.DS_Store
+Thumbs.db
