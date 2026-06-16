@@ -21,6 +21,8 @@ async function socketPlugin(fastify: FastifyInstance) {
       },
     });
 
+    fastify.decorate('io', io);
+
     // Share access token validation directly with your existing JWT secret
     io.use((socket: Socket, next) => {
       const authHeader = socket.handshake.auth?.token || socket.handshake.headers?.authorization;
