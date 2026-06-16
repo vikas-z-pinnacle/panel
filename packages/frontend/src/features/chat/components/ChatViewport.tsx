@@ -14,7 +14,7 @@ interface Message {
 }
 
 export default function ChatViewport() {
-  const { conversationId } = useParams<{ conversationId: string }>();
+  const { roomId } = useParams<{ roomId: string }>();
   const { socket } = useChatStore();
   const { user: currentUser } = useAuthStore(); // Grab active session user to check identity
   
@@ -34,31 +34,37 @@ export default function ChatViewport() {
 
   // Load message history on thread change
   useEffect(() => {
-    if (!conversationId) return;
+    if (!roomId) return;
 
     setLoading(true);
-    api.get(`/chat/rooms/${conversationId}/messages`)
+    api.get(`/chat/rooms/${roomId}/messages`)
       .then(res => setMessages(res.data.messages || []))
       .catch(() => console.error('Failed to load conversation history.'))
       .finally(() => setLoading(false));
 
     if (socket) {
-      socket.emit('join_room', { roomId: conversationId });
+      socket.emit('join_room', { roomId: roomId });
     }
 
     return () => {
       if (socket) {
-        socket.emit('leave_room', { roomId: conversationId });
+        socket.emit('leave_room', { roomId: roomId });
       }
     };
-  }, [conversationId, socket]);
+  }, [roomId, socket]);
 
-  // Listen for real-time messages via open socket connection
+  // Listen for real-time messages via open socket connection.
+  // Deduplicates by ID to handle cases where the server echoes back
+  // a message the sender already appended optimistically.
   useEffect(() => {
     if (!socket) return;
 
     const handleNewIncomingMessage = (message: Message) => {
-      setMessages((prev) => [...prev, message]);
+      setMessages((prev) => {
+        const alreadyExists = prev.some((m) => m.id === message.id);
+        if (alreadyExists) return prev;
+        return [...prev, message];
+      });
     };
 
     socket.on('new_message', handleNewIncomingMessage);
@@ -70,13 +76,35 @@ export default function ChatViewport() {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!text.trim() || !conversationId) return;
+    if (!text.trim() || !roomId || !currentUser) return;
+
+    const content = text.trim();
+    setText('');
+
+    // Optimistically append the message immediately so the sender
+    // sees their own message without waiting for a socket round-trip.
+    const optimisticMsg: Message = {
+      id: `optimistic-${Date.now()}`,
+      senderId: currentUser.id,
+      senderName: currentUser.name ?? 'You',
+      content,
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, optimisticMsg]);
 
     try {
-      await api.post(`/chat/rooms/${conversationId}/messages`, { content: text.trim() });
-      setText('');
+      const res = await api.post(`/chat/rooms/${roomId}/messages`, { content });
+      const savedMessage: Message = res.data.message;
+
+      // Replace the optimistic placeholder with the real persisted message
+      setMessages((prev) =>
+        prev.map((m) => (m.id === optimisticMsg.id ? savedMessage : m))
+      );
     } catch (err) {
       console.error('Could not transmit payload upstream.');
+      // Roll back the optimistic message on failure
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticMsg.id));
+      setText(content); // Restore input so the user can retry
     }
   };
 
@@ -84,7 +112,7 @@ export default function ChatViewport() {
     <div className="flex-1 flex flex-col h-full bg-slate-50/50">
       {/* Active Header Sticky Bar */}
       <div className="h-16 border-b border-slate-200 px-6 flex items-center bg-white shadow-xs">
-        <span className="font-bold text-slate-800 text-sm">Channel Context: {conversationId}</span>
+        <span className="font-bold text-slate-800 text-sm">Channel Context: {roomId}</span>
       </div>
 
       {/* Message Streaming Container */}

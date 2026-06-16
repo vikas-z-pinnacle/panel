@@ -1,5 +1,12 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { ChatService } from './chat.service.js';
+import { Server } from 'socket.io';
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    io?: Server;
+  }
+}
 
 const chatService = new ChatService();
 
@@ -87,5 +94,41 @@ export async function createGroupRoomHandler(
   } catch (error) {
     request.log.error(error);
     return reply.status(500).send({ error: 'Failed to create group channel structure.' });
+  }
+}
+
+export async function sendMessageHandler(
+  request: FastifyRequest<{ 
+    Params: { roomId: string };
+    Body: { content: string };
+  }>,
+  reply: FastifyReply
+) {
+  try {
+    const user = request.user as { id: string };
+    const { roomId } = request.params;
+    const { content } = request.body;
+
+    if (!content || !content.trim()) {
+      return reply.status(400).send({ error: 'Message content cannot be empty.' });
+    }
+
+    // Verify user is a participant in this room
+    const isParticipant = await chatService.isUserInRoom(user.id, roomId);
+    if (!isParticipant) {
+      return reply.status(403).send({ error: 'You are not a participant in this room.' });
+    }
+
+    const message = await chatService.createMessage(roomId, user.id, content.trim());
+    
+    // Emit via WebSocket if socket plugin is available
+    if (request.server.io) {
+      request.server.io.to(roomId).emit('new_message', message);
+    }
+
+    return reply.status(201).send({ message });
+  } catch (error) {
+    request.log.error(error);
+    return reply.status(500).send({ error: 'Failed to send message.' });
   }
 }

@@ -52,8 +52,8 @@ export default function ChatLayout() {
     setSearchQuery('');
     
     try {
-      const res = await api.get('/users/accounts');
-      setSystemUsers(res.data.accounts || []);
+      const res = await api.get('/users/all-users');
+      setSystemUsers(res.data.users || []);
     } catch (err) {
       console.error('Could not populate system directory lists.');
     }

@@ -5,7 +5,8 @@ import {
   getUserRoomsHandler, 
   getRoomMessagesHandler, 
   createDirectMessageHandler, 
-  createGroupRoomHandler 
+  createGroupRoomHandler, 
+  sendMessageHandler
 } from './chat.handlers.js';
 
 const chatService = new ChatService();
@@ -15,6 +16,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
 
   fastify.get('/rooms', getUserRoomsHandler);
   fastify.get('/rooms/:roomId/messages', getRoomMessagesHandler);
+  fastify.post('/rooms/:roomId/messages', sendMessageHandler);
   fastify.post('/rooms/dm', createDirectMessageHandler);
   fastify.post('/rooms/group', createGroupRoomHandler);
 }

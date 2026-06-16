@@ -85,7 +85,7 @@ export class ChatService {
       // 4. No pre-existing true DM room found; build a new communications link safely
       const [newRoom] = await tx
         .insert(chatRoomsTable)
-        .values({ name: `DM: ${targetUserName}` })
+        .values({ name: `${targetUserName}` })
         .returning();
 
       await tx.insert(chatRoomParticipantsTable).values([
@@ -139,4 +139,17 @@ export class ChatService {
       senderName: sender?.name || 'System User',
     };
   }
+
+  async isUserInRoom(userId: string, roomId: string): Promise<boolean> {
+  const [participant] = await db
+    .select()
+    .from(chatRoomParticipantsTable)
+    .where(
+      and(
+        eq(chatRoomParticipantsTable.userId, userId),
+        eq(chatRoomParticipantsTable.roomId, roomId)
+      )
+    );
+  return !!participant;
+}
 }

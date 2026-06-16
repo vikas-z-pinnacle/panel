@@ -16,7 +16,7 @@ async function socketPlugin(fastify: FastifyInstance) {
   fastify.addHook('onReady', function (done) {
     const io = new SocketServer(fastify.server, {
       cors: {
-        origin: 'http://localhost:5173', // Matches your Vite client port
+        origin: process.env.FRONTEND, // Matches your Vite client port
         methods: ['GET', 'POST'],
       },
     });

@@ -274,6 +274,11 @@ You must maintain a unified setup. Do not place individual .gitignore files insi
 
 
 
+Fetch All Users
+
+
+While you have built excellent logic on both ends, a crucial bridge is missing: the backend is emitting to a Socket.io room, but your Socket.io backend server never actually handles the join_room event to put the user's socket into that room.
+
 
 
 

@@ -75,7 +75,7 @@ export default function App() {
             {/* Master-Detail Routing boundaries for Chat Workspace */}
             <Route path="/chat" element={<ChatLayout />}>
               <Route index element={<ChatPlaceholder />} />
-              <Route path=":conversationId" element={<ChatViewport />} />
+              <Route path=":roomId" element={<ChatViewport />} />
             </Route>
           </Route>
 
