@@ -284,6 +284,25 @@ Backend Emits: In chat.handlers.ts, your sendMessageHandler tries to broadcast t
 The Missing Bridge: On your Socket.io backend server architecture (the file where you initialize socket.io), you don't have a listener for 'join_room'. Because the backend server hasn't explicitly called socket.join(roomId), broadcasting to .to(roomId) hits an empty room matrix.
 
 
+Connection lifecycle✅ Covered
+Auth middleware✅ Covered
+Room join/leave + broadcasting✅ Covered
+Room-level authorization❌ Pending — security gap
+REST/socket dual-path consistency⚠️ Partial — redundant + unguarded
+Reconnection handling❌ Pending
+Error acks back to client❌ Pending
+Input validation⚠️ Partial
+Optimistic updates + dedup✅ Covered
+CORS config⚠️ Partial/fragile
+Typing/presence indicators❌ Pending
+Multi-device handling❌ Pending
+Horizontal scaling (Redis adapter)❌ Pending
+Token expiry mid-connection❌ Pending
+
+
+I'll address the gaps in priority order: (4) room-level authorization, (5) dual-path consistency, (6) reconnection handling, (7) error acks, (8) input validation, (10) CORS fragility. I'll leave presence/typing, multi-device, and Redis scaling out since those are net-new features rather than fixes to existing code — happy to build those separately if you want them.
+
+
 
 
 

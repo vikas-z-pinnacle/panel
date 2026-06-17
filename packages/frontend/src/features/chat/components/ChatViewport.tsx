@@ -15,7 +15,7 @@ interface Message {
 
 export default function ChatViewport() {
   const { roomId } = useParams<{ roomId: string }>();
-  const { socket } = useChatStore();
+  const { socket, joinRoom, leaveRoom } = useChatStore();
   const { user: currentUser } = useAuthStore(); // Grab active session user to check identity
   
   const [messages, setMessages] = useState<Message[]>([]);
@@ -43,12 +43,12 @@ export default function ChatViewport() {
       .finally(() => setLoading(false));
 
     if (socket) {
-      socket.emit('join_room', { roomId: roomId });
+      joinRoom(roomId);
     }
 
     return () => {
       if (socket) {
-        socket.emit('leave_room', { roomId: roomId });
+        leaveRoom(roomId);
       }
     };
   }, [roomId, socket]);
@@ -74,11 +74,17 @@ export default function ChatViewport() {
     };
   }, [socket]);
 
+  const MAX_MESSAGE_LENGTH = 4000;
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!text.trim() || !roomId || !currentUser) return;
 
     const content = text.trim();
+    if (content.length > MAX_MESSAGE_LENGTH) {
+      console.error(`Message exceeds ${MAX_MESSAGE_LENGTH} character limit.`);
+      return;
+    }
     setText('');
 
     // Optimistically append the message immediately so the sender

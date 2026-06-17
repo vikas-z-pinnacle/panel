@@ -1,6 +1,7 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { ChatService } from './chat.service.js';
 import { Server } from 'socket.io';
+import { userSocketRegistry } from '../../plugins/socket.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -9,6 +10,7 @@ declare module 'fastify' {
 }
 
 const chatService = new ChatService();
+const MAX_MESSAGE_LENGTH = 4000;
 
 export async function getUserRoomsHandler(request: FastifyRequest, reply: FastifyReply) {
   try {
@@ -113,6 +115,10 @@ export async function sendMessageHandler(
       return reply.status(400).send({ error: 'Message content cannot be empty.' });
     }
 
+    if (content.trim().length > MAX_MESSAGE_LENGTH) {
+      return reply.status(400).send({ error: `Message content cannot exceed ${MAX_MESSAGE_LENGTH} characters.` });
+    }
+
     // Verify user is a participant in this room
     const isParticipant = await chatService.isUserInRoom(user.id, roomId);
     if (!isParticipant) {
@@ -121,9 +127,17 @@ export async function sendMessageHandler(
 
     const message = await chatService.createMessage(roomId, user.id, content.trim());
     
-    // Emit via WebSocket if socket plugin is available
+    // Emit via WebSocket if socket plugin is available — but EXCLUDE the
+    // sender's own connected socket(s). The sender already gets the
+    // authoritative persisted message back in this HTTP response and
+    // renders it by replacing their optimistic message; if we also
+    // echoed it back over the socket, the sender's client would receive
+    // it as a second 'new_message' event and (depending on timing vs.
+    // the optimistic-message id swap) render it twice. Other room
+    // participants still get the real-time push as normal.
     if (request.server.io) {
-      request.server.io.to(roomId).emit('new_message', message);
+      const senderSocketIds = Array.from(userSocketRegistry.get(user.id) ?? []);
+      request.server.io.to(roomId).except(senderSocketIds).emit('new_message', message);
     }
 
     return reply.status(201).send({ message });
