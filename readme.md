@@ -306,6 +306,18 @@ I'll address the gaps in priority order: (4) room-level authorization, (5) dual-
 
 presence/typing, multi-device, and Redis scaling
 
+docker exec -it panel_redis redis-cli MONITOR
+
+docker compose up --build
+
+
+
+
+
+
+
+
+
 
 
 

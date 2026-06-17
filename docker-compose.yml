@@ -1,14 +1,63 @@
 version: '3.8'
 
 services:
+  # 1. Shared Message Broker
   redis:
     image: redis:7-alpine
-    container_name: panel_redis
+    container_name: app_redis
     ports:
       - "6379:6379"
-    volumes:
-      - redis_data:/data
-    restart: always
 
-volumes:
-  redis_data:
+  # 2. Backend Instance A
+  backend-a:
+    build:
+      context: .
+      dockerfile: ./packages/backend/Dockerfile
+    container_name: app_backend_a
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=your_jwt_secret_here
+    depends_on:
+      - redis
+
+  # 3. Backend Instance B (Horizontal Scale Target)
+  backend-b:
+    build:
+      context: .
+      dockerfile: ./packages/backend/Dockerfile
+    container_name: app_backend_b
+    ports:
+      - "5001:5001"
+    environment:
+      - PORT=5001
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=your_jwt_secret_here
+    depends_on:
+      - redis
+
+  # 4. Frontend Instance A (Hooks into Backend A)
+  frontend-a:
+    build:
+      context: .
+      dockerfile: ./packages/frontend/Dockerfile
+    container_name: app_frontend_a
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:5000/api
+      - VITE_WS_URL=http://localhost:5000
+
+  # 5. Frontend Instance B (Hooks into Backend B)
+  frontend-b:
+    build:
+      context: .
+      dockerfile: ./packages/frontend/Dockerfile
+    container_name: app_frontend_b
+    ports:
+      - "5174:5173" # Maps port 5174 on your host machine to container port 5173
+    environment:
+      - VITE_API_URL=http://localhost:5001/api
+      - VITE_WS_URL=http://localhost:5001

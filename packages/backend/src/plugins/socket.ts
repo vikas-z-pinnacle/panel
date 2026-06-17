@@ -3,6 +3,8 @@ import fp from 'fastify-plugin';
 import { Server as SocketServer, Socket } from 'socket.io';
 import jsonwebtoken from 'jsonwebtoken';
 import { ChatService } from '../modules/chat/chat.service.js';
+import { createClient } from 'redis';
+import { createAdapter } from '@socket.io/redis-adapter';
 
 interface JWTPayload {
   id: string;
@@ -50,6 +52,18 @@ function isAck(fn: unknown): fn is Ack {
 }
 
 async function socketPlugin(fastify: FastifyInstance) {
+  const redisUrl = process.env.REDIS_URL;
+  let adapter: ReturnType<typeof createAdapter> | undefined = undefined;
+
+  if (redisUrl) {
+    const pubClient = createClient({ url: redisUrl });
+    const subClient = pubClient.duplicate();
+    
+    await Promise.all([pubClient.connect(), subClient.connect()]);
+    fastify.log.info('[Socket.IO] Redis adapter connected successfully.');
+    adapter = createAdapter(pubClient, subClient);
+  }
+
   fastify.addHook('onReady', function (done) {
     // FRONTEND must be explicitly set — falling back to a permissive/undefined
     // origin here would either break CORS or silently allow any origin
@@ -62,6 +76,7 @@ async function socketPlugin(fastify: FastifyInstance) {
     }
 
     const io = new SocketServer(fastify.server, {
+      adapter,
       cors: {
         origin: allowedOrigin || false, // `false` disables cross-origin access rather than silently allowing it
         methods: ['GET', 'POST'],

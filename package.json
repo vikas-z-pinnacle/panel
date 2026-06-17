@@ -6,8 +6,8 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:backend": "npm run dev -w packages/backend",
-    "dev:frontend": "npm run dev -w packages/frontend",
-    "build:shared": "npm run build -w packages/shared"
+    "dev:backend": "npm run dev -w backend",
+    "dev:frontend": "npm run dev -w frontend",
+    "build:shared": "npm run build -w @my-app/shared"
   }
 }
