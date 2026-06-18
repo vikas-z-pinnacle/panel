@@ -306,14 +306,25 @@ I'll address the gaps in priority order: (4) room-level authorization, (5) dual-
 
 presence/typing, multi-device, and Redis scaling
 
-docker exec -it panel_redis redis-cli MONITOR
-
-docker compose up --build
 
 
+docker exec -it app_redis redis-cli MONITOR
+
+# If you modified any .ts files, component structures, or backend logic, the Docker images need to compile your new code and rebuild. 
+docker compose up --build -d
+
+# changed a .env file or docker-compose.yml
+docker compose up -d
+
+docker compose exec backend-a npm run db:push -w backend
+
+psql -U postgres -d panel_db
+
+docker compose logs backend-b --tail=50
 
 
 
+connect postgresql in db viewer
 
 
 

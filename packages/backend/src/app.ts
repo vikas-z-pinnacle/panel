@@ -35,7 +35,13 @@ await app.register(fastifyJwt, {
   },
 });
 
-await app.register(cors, { origin: 'http://localhost:5173' });
+await app.register(cors, {
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:5174',
+  ],
+  credentials: true,
+});
 
 await app.register(authRoutes, { prefix: '/api/auth' });
 await app.register(protectedUserRoutes, { prefix: '/api/users' });

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # 1. Shared Message Broker
   redis:
@@ -8,7 +6,25 @@ services:
     ports:
       - "6379:6379"
 
-  # 2. Backend Instance A
+  # 2. Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: app_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=panel_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 3. Backend Instance A
   backend-a:
     build:
       context: .
@@ -19,11 +35,16 @@ services:
     environment:
       - PORT=5000
       - REDIS_URL=redis://redis:6379
+      - ALLOWED_ORIGIN=http://localhost:5173
       - JWT_SECRET=your_jwt_secret_here
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/panel_db
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
 
-  # 3. Backend Instance B (Horizontal Scale Target)
+  # 4. Backend Instance B (Horizontal Scale Target)
   backend-b:
     build:
       context: .
@@ -34,11 +55,16 @@ services:
     environment:
       - PORT=5001
       - REDIS_URL=redis://redis:6379
+      - ALLOWED_ORIGIN=http://localhost:5174
       - JWT_SECRET=your_jwt_secret_here
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/panel_db
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
 
-  # 4. Frontend Instance A (Hooks into Backend A)
+  # 5. Frontend Instance A (Hooks into Backend A)
   frontend-a:
     build:
       context: .
@@ -50,14 +76,17 @@ services:
       - VITE_API_URL=http://localhost:5000/api
       - VITE_WS_URL=http://localhost:5000
 
-  # 5. Frontend Instance B (Hooks into Backend B)
+  # 6. Frontend Instance B (Hooks into Backend B)
   frontend-b:
     build:
       context: .
       dockerfile: ./packages/frontend/Dockerfile
     container_name: app_frontend_b
     ports:
-      - "5174:5173" # Maps port 5174 on your host machine to container port 5173
+      - "5174:5173"
     environment:
       - VITE_API_URL=http://localhost:5001/api
       - VITE_WS_URL=http://localhost:5001
+
+volumes:
+  pgdata:

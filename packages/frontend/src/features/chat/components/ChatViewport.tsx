@@ -7,6 +7,7 @@ import { Send, Loader2 } from 'lucide-react';
 
 interface Message {
   id: string;
+  roomId: string;
   senderId: string;
   senderName: string;
   content: string;
@@ -16,14 +17,13 @@ interface Message {
 export default function ChatViewport() {
   const { roomId } = useParams<{ roomId: string }>();
   const { socket, joinRoom, leaveRoom } = useChatStore();
-  const { user: currentUser } = useAuthStore(); // Grab active session user to check identity
+  const { user: currentUser } = useAuthStore();
   
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [text, setText] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Auto scroll to latest messages securely
   const scrollToBottom = () => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -32,128 +32,101 @@ export default function ChatViewport() {
     scrollToBottom();
   }, [messages]);
 
-  // Load message history on thread change
+  // 1. Fetch conversation history when moving between rooms
   useEffect(() => {
     if (!roomId) return;
 
     setLoading(true);
     api.get(`/chat/rooms/${roomId}/messages`)
-      .then(res => setMessages(res.data.messages || []))
-      .catch(() => console.error('Failed to load conversation history.'))
+      .then((res) => setMessages(res.data.messages))
+      .catch((err) => console.error('Failed to fetch historical messages:', err))
       .finally(() => setLoading(false));
 
-    if (socket) {
-      joinRoom(roomId);
-    }
+    joinRoom(roomId);
 
     return () => {
-      if (socket) {
-        leaveRoom(roomId);
-      }
+      leaveRoom(roomId);
     };
-  }, [roomId, socket]);
+  }, [roomId, joinRoom, leaveRoom]);
 
-  // Listen for real-time messages via open socket connection.
-  // Deduplicates by ID to handle cases where the server echoes back
-  // a message the sender already appended optimistically.
+  // 2. LISTEN FOR REAL-TIME BROADCASTS FROM THE WEBSOCKET ENGINE CLUSTER
   useEffect(() => {
     if (!socket) return;
 
-    const handleNewIncomingMessage = (message: Message) => {
-      setMessages((prev) => {
-        const alreadyExists = prev.some((m) => m.id === message.id);
-        if (alreadyExists) return prev;
-        return [...prev, message];
-      });
+    const handleNewMessage = (incomingMessage: Message) => {
+      // Guard: Ensure incoming message belongs to the room the user is actively viewing
+      if (incomingMessage.roomId === roomId) {
+        setMessages((prev) => {
+          // Prevent duplicates (e.g. if HTTP REST response and WS broker cross over)
+          if (prev.some((msg) => msg.id === incomingMessage.id)) return prev;
+          return [...prev, incomingMessage];
+        });
+      }
     };
 
-    socket.on('new_message', handleNewIncomingMessage);
+    socket.on('new_message', handleNewMessage);
 
     return () => {
-      socket.off('new_message', handleNewIncomingMessage);
+      socket.off('new_message', handleNewMessage);
     };
-  }, [socket]);
+  }, [socket, roomId]);
 
-  const MAX_MESSAGE_LENGTH = 4000;
-
+  // 3. Dispatch messages via the authoritative REST interface path
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!text.trim() || !roomId || !currentUser) return;
+    if (!text.trim() || !roomId) return;
 
-    const content = text.trim();
-    if (content.length > MAX_MESSAGE_LENGTH) {
-      console.error(`Message exceeds ${MAX_MESSAGE_LENGTH} character limit.`);
-      return;
-    }
-    setText('');
-
-    // Optimistically append the message immediately so the sender
-    // sees their own message without waiting for a socket round-trip.
-    const optimisticMsg: Message = {
-      id: `optimistic-${Date.now()}`,
-      senderId: currentUser.id,
-      senderName: currentUser.name ?? 'You',
-      content,
-      createdAt: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, optimisticMsg]);
+    const currentText = text.trim();
+    setText(''); // Optimistic input clearing for a faster UI feel
 
     try {
-      const res = await api.post(`/chat/rooms/${roomId}/messages`, { content });
-      const savedMessage: Message = res.data.message;
+      const res = await api.post(`/chat/rooms/${roomId}/messages`, { content: currentText });
+      const createdMessage = res.data.message;
 
-      // Replace the optimistic placeholder with the real persisted message
-      setMessages((prev) =>
-        prev.map((m) => (m.id === optimisticMsg.id ? savedMessage : m))
-      );
+      // Manually append the message since the socket.ts backend excludes the sender to avoid duplicates
+      setMessages((prev) => {
+        if (prev.some((msg) => msg.id === createdMessage.id)) return prev;
+        return [...prev, createdMessage];
+      });
     } catch (err) {
-      console.error('Could not transmit payload upstream.');
-      // Roll back the optimistic message on failure
-      setMessages((prev) => prev.filter((m) => m.id !== optimisticMsg.id));
-      setText(content); // Restore input so the user can retry
+      console.error('Failed to dispatch message context payload:', err);
     }
   };
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-50/50">
-      {/* Active Header Sticky Bar */}
-      <div className="h-16 border-b border-slate-200 px-6 flex items-center bg-white shadow-xs">
-        <span className="font-bold text-slate-800 text-sm">Channel Context: {roomId}</span>
-      </div>
-
-      {/* Message Streaming Container */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      {/* Scrollable Message Area */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {loading ? (
-          <div className="flex justify-center items-center h-full">
+          <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2">
             <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+            <span className="text-xs font-medium">Syncing distributed node entries...</span>
           </div>
         ) : messages.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-xs text-slate-400">
-            No historical log records found. Type a message below to begin chatting!
+          <div className="flex items-center justify-center h-full text-slate-400 text-xs font-medium">
+            No secure communications recorded in this context yet.
           </div>
         ) : (
           messages.map((msg) => {
-            // Identity Comparison Guard Check
             const isOwnMessage = msg.senderId === currentUser?.id;
-
             return (
-              <div 
-                key={msg.id} 
-                className={`flex w-full ${isOwnMessage ? 'justify-end' : 'justify-start'}`}
+              <div
+                key={msg.id}
+                className={`flex flex-col ${isOwnMessage ? 'items-end' : 'items-start'}`}
               >
-                <div 
-                  className={`max-w-md p-3.5 rounded-2xl shadow-2xs border transition-all relative group
-                    ${isOwnMessage 
-                      ? 'bg-blue-500 border-blue-700 text-white rounded-tr-none' // Right Side (You)
-                      : 'bg-white border-slate-200 text-slate-800 rounded-tl-none' // Left Side (Others)
-                    }`}
+                <div
+                  className={`max-w-[70%] rounded-2xl px-4 py-2.5 shadow-xs transition-all ${
+                    isOwnMessage
+                      ? 'bg-blue-600 text-white rounded-br-none'
+                      : 'bg-white border border-slate-100 text-slate-800 rounded-bl-none'
+                  }`}
                 >
-                  {/* Sender Identifier Meta Tag */}
-                  <div className="flex items-baseline justify-between gap-6">
-                    <span className={`text-[11px] font-bold tracking-wide truncate ${isOwnMessage ? 'text-blue-100' : 'text-slate-500'}`}>
+                  {/* Meta Details Bar */}
+                  <div className="flex items-center justify-between gap-6 mb-0.5">
+                    <span className={`text-[11px] font-bold tracking-tight truncate ${isOwnMessage ? 'text-blue-100' : 'text-slate-500'}`}>
                       {isOwnMessage ? 'You' : msg.senderName}
                     </span>
-                    <span className={`text-[9px] select-none uppercase tracking-wider ${isOwnMessage ? 'text-blue-200' : 'text-slate-400'}`}>
+                    <span className={`text-[10px] font-medium tracking-wider select-none ${isOwnMessage ? 'text-blue-200' : 'text-slate-400'}`}>
                       {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>

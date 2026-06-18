@@ -7,12 +7,7 @@ interface ChatStore {
   socket: Socket | null;
   isConnected: boolean;
   connectionStatus: ConnectionStatus;
-  // Rooms the UI currently wants joined (e.g. the active chat thread).
-  // Re-applied automatically after every reconnect, since Socket.IO
-  // does NOT remember server-side room membership across a reconnect —
-  // a fresh underlying connection means the server-side socket.join()
-  // calls from before are gone and must be redone.
-  activeRoomIds: Set<string>;
+  activeRoomIds: Set<string>; // Track requested rooms explicitly
   initializeSocket: (token: string) => void;
   disconnectSocket: () => void;
   joinRoom: (roomId: string) => void;
@@ -28,54 +23,32 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   initializeSocket: (token) => {
     if (get().socket?.connected) return;
 
-    // Direct configuration point targeting base server URL engine instance
-    const wsUrl = import.meta.env.VITE_WS_URL || 'http://localhost:5000';
+    // Fix: Cleanly separate the API endpoint from the WebSocket base connection domain
+    const rawUrl = import.meta.env.VITE_WS_URL || 'http://localhost:5000';
+    const wsUrl = rawUrl.replace(/\/api$/, ''); 
 
     const socket = io(wsUrl, {
-      auth: { token: `Bearer ${token}` },
-      autoConnect: true,
-      // Reconnection is on by default in socket.io-client, but we set
-      // these explicitly so behavior doesn't silently change on a
-      // library upgrade, and so we have a bounded backoff.
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 10000,
+      auth: { token },
+      transports: ['websocket', 'polling'],
     });
 
     socket.on('connect', () => {
       set({ isConnected: true, connectionStatus: 'connected' });
-
-      // Re-join any rooms the UI considers "active". A reconnect gives us
-      // a brand new transport-level connection; the server's in-memory
-      // socket.join() state from before the drop is gone, so without this
-      // the client would silently stop receiving new_message events for
-      // the room it was just looking at.
+      
+      // AUTO-RESYNC: When connecting or reconnecting, join all active rooms
       const { activeRoomIds } = get();
       activeRoomIds.forEach((roomId) => {
-        socket.emit('join_room', { roomId }, (res: { ok: boolean; error?: string }) => {
-          if (!res?.ok) {
-            console.error(`Failed to rejoin room ${roomId} after reconnect:`, res?.error);
-          }
+        socket.emit('join_room', { roomId }, (res: any) => {
+          if (!res?.ok) console.error(`Failed to join room ${roomId} on connect:`, res?.error);
         });
       });
     });
 
     socket.on('disconnect', (reason) => {
-      // 'io server disconnect' means the server forcibly closed the
-      // connection (e.g. auth revoked) and socket.io-client will NOT
-      // auto-reconnect in that case unless we tell it to.
-      if (reason === 'io server disconnect') {
-        set({ isConnected: false, connectionStatus: 'disconnected' });
-      } else {
-        set({ isConnected: false, connectionStatus: 'reconnecting' });
-      }
+      set({ isConnected: false, connectionStatus: reason === 'io client disconnect' ? 'idle' : 'disconnected' });
     });
 
     socket.on('connect_error', (err) => {
-      // Auth failures surface here (e.g. expired/invalid JWT). Distinguish
-      // them from generic network errors so the UI can prompt a re-login
-      // instead of just showing "reconnecting...".
       const isAuthError = /unauthorized/i.test(err.message);
       set({
         isConnected: false,
@@ -83,7 +56,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       });
 
       if (isAuthError) {
-        // Stop endlessly retrying with a token that will never become valid.
         socket.disconnect();
       }
     });
@@ -105,11 +77,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     next.add(roomId);
     set({ activeRoomIds: next });
 
+    // Emit immediately if the socket is already connected; otherwise, the 'connect' listener will handle it
     if (socket?.connected) {
       socket.emit('join_room', { roomId }, (res: { ok: boolean; error?: string }) => {
-        if (!res?.ok) {
-          console.error(`Failed to join room ${roomId}:`, res?.error);
-        }
+        if (!res?.ok) console.error(`Failed to join room ${roomId}:`, res?.error);
       });
     }
   },

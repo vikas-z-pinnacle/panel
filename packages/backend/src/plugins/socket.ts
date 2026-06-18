@@ -78,7 +78,13 @@ async function socketPlugin(fastify: FastifyInstance) {
     const io = new SocketServer(fastify.server, {
       adapter,
       cors: {
-        origin: allowedOrigin || false, // `false` disables cross-origin access rather than silently allowing it
+        origin: (origin, callback) => {
+          if (!origin || origin.startsWith('http://localhost:')) {
+            callback(null, true);
+          } else {
+            callback(new Error('Not allowed by CORS'));
+          }
+        }, 
         methods: ['GET', 'POST'],
         credentials: true,
       },
@@ -88,12 +94,26 @@ async function socketPlugin(fastify: FastifyInstance) {
 
     // Share access token validation directly with your existing JWT secret
     io.use((socket: Socket, next) => {
-      const authHeader = socket.handshake.auth?.token || socket.handshake.headers?.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return next(new Error('Unauthorized: Missing token header'));
+      // socket.handshake.auth.token is set client-side via `io(url, { auth: { token } })`
+      // and is the RAW JWT — "Bearer " is an HTTP header convention, it never applies here.
+      // Only the Authorization-header fallback (for non-browser/server-to-server clients)
+      // is expected to be "Bearer <token>". Applying the same prefix check to both caused
+      // every browser socket handshake to fail auth (silently, with no console error),
+      // which is why join_room never ran and 'new_message' broadcasts were never received.
+      const rawAuthToken = socket.handshake.auth?.token as string | undefined;
+      const authorizationHeader = socket.handshake.headers?.authorization;
+
+      let token: string | undefined;
+      if (rawAuthToken) {
+        token = rawAuthToken;
+      } else if (authorizationHeader?.startsWith('Bearer ')) {
+        token = authorizationHeader.split(' ')[1];
       }
 
-      const token = authHeader.split(' ')[1];
+      if (!token) {
+        return next(new Error('Unauthorized: Missing token'));
+      }
+
       const jwtSecret = process.env.JWT_SECRET;
 
       if (!jwtSecret) {
